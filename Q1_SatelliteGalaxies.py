@@ -61,13 +61,20 @@ def n(x: np.ndarray, A: float, Nsat: float, a: float, b: float, c: float) -> np.
         Same type and shape as x. Number density of satellite galaxies
         at given radius x.
     """
-    return 0  # insert your function (copy from hand-in 2)
+    # Create x and n arrays
+    x = np.asarray(x)
+    n = np.zeros_like(x)
+
+    # Function is only defined for positive x
+    n[x>0] = A * Nsat * (x[x>0] / b) ** (a-3) * np.exp(-(x[x>0] / b) ** c)
+
+    return n
 
 
 # Following the lectures, the function below provides a template for a custom minimization method.
 # Depending on your choice of method, you may or may not need to add more function input parameters.
 def my_minimizer(
-    func: callable, x_arr: np.ndarray, bounds: tuple, tol: float = 1e-5
+    func: callable, bounds: tuple, tol: float = 1e-5, max_iters: int=100
 ) -> tuple:
     """
     Custom minimization method.
@@ -91,10 +98,62 @@ def my_minimizer(
     func_min : float
         Minimum value of func.
     """
+    def bracketing(bracket):
+        w = (1 + np.sqrt(5)) * 0.5
+        a = bracket[0] if func(bracket[0]) > func(bracket[1]) else bracket[1]
+        b = bracket[0] if bracket[0] != a else bracket[1]
+        c = b + (b - a) * w
+        for _ in range(max_iters):
+            y_a = func(a)
+            y_b = func(b)
+            y_c = func(c)
+            if y_c > y_b:
+                return [a, b, c]
+            else: 
+                term_1 = c * (y_b - y_a)
+                term_2 = b * (y_a - y_c)
+                term_3 = a * (y_c - y_b)
+                d = -0.5 * (term_3 * c + term_2 * b + term_1 * a) / (term_3 + term_2 + term_1)
+                y_d = func(d)
+                if d > b and d < c:
+                    if y_d < y_c:
+                        return [b, d, c]
+                    elif y_d > y_b:
+                        return [a, b, d]
+                    else:
+                        d = c + (c - b) * w
+                else:
+                    if np.abs(d - b) > 100 * np.abs(c-b):
+                        d = c + (c - b) * w
+            a = b
+            b = c
+            c = d
 
-    # TODO: implement your minimization method here, e.g. by using a golden section search or Brent's method
-
-    return 0.0, 0.0  # replace by the correct return value(s)
+    w = 2 - (1 + np.sqrt(5)) * 0.5
+    a, b, c = bracketing(bounds)
+    for _ in range(max_iters):
+        if np.abs(c - b) > np.abs(b - a):
+            d = b + (c - b) * w
+        else:
+            d = b + (a - b) * w
+        
+        if np.abs(c - a) < tol:
+            break
+    
+        if func(d) < func(b):
+            if (d > b and d < c) or (d > c and d < b):
+                a = b
+                b = d
+            else:
+                c = b
+                b = d
+        else:
+            if (d > b and d < c) or (d > c and d < b):
+                c = d
+            else:
+                a = d
+    x = d if func(d) < func(b) else b
+    return x, func(x)
 
 
 #### Fitting ####
@@ -250,8 +309,7 @@ def do_question_1a():
     A_1a = 256 / (5 * np.pi ** (3 / 2))
     x_lower, x_upper = 10**-4, 5
 
-    x_max, Nx_max = my_minimizer(lambda x: 0.0, np.array([0.0]), (x_lower, x_upper))
-    # replace with calculation of the maximum of N(x) based on n(x, A, Nsat, a, b, c) and your minimizer
+    x_max, Nx_max = my_minimizer(lambda x: -4*np.pi*x**2*n(x, A=A_1a, Nsat=Nsat, a=a, b=b, c=c), (x_lower, x_upper))
 
     # Write the results to text files for later use in the PDF
     with open("Calculations/satellite_max_x.txt", "w") as f:
