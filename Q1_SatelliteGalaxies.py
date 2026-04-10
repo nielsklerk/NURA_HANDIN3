@@ -1,6 +1,8 @@
 # imports
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.integrate import quad
 
 
 def readfile(filename):
@@ -70,6 +72,62 @@ def n(x: np.ndarray, A: float, Nsat: float, a: float, b: float, c: float) -> np.
 
     return n
 
+def romberg_integrator(func: callable, bounds: tuple, order: int = 10, err: bool = False, args: tuple = ()
+) -> float:
+    """
+    Romberg integration method
+
+    Parameters
+    ----------
+    func : callable
+        Function to integrate.
+    bounds : tuple
+        Lower- and upper bound for integration.
+    order : int, optional
+        Order of the integration.
+        The default is 5.
+    err : bool, optional
+        Whether to retun first error estimate.
+        The default is False.
+    args : tuple, optional
+        Arguments to be passed to func.
+        The default is ().
+
+    Returns
+    -------
+    float
+        Value of the integral. If err=True, returns the tuple
+        (value, err), with err a first estimate of the (relative)
+        error.
+    """
+    a, b = bounds
+    h = b - a
+
+    r = np.zeros(order)
+    r[0] = 0.5 * h * (func(b, *args) + func(a, *args))
+    N_p = 1
+    # Create the list of starting estimates
+    for i in range(1, order):
+        r[i] = 0
+        delta = np.copy(h)
+        h *= 0.5
+        x = a + h
+        for _ in range(N_p):
+            r[i] += func(x, *args)
+            x += delta
+        r[i] = 0.5 * (r[i-1] + delta * r[i])
+        N_p *= 2
+
+    N_p = 1
+    # Iteratively improve the estimates
+    for i in range(1, order):
+        N_p *= 4
+        r[:order - i] = (N_p * r[1:order - i + 1] - r[:order - i]) / (N_p - 1)
+
+    # Returns error if needed
+    if err:
+        return r[0], np.abs(r[0]-r[1])  # (value, error)
+    return r[0] # value
 
 # Following the lectures, the function below provides a template for a custom minimization method.
 # Depending on your choice of method, you may or may not need to add more function input parameters.
@@ -159,7 +217,7 @@ def my_minimizer(
 #### Fitting ####
 
 
-def chi2(model: callable, data: np.ndarray, params: tuple) -> float:
+def chi2(params: tuple, model: callable, data: np.ndarray,) -> float:
     """
     Calculate the chi-squared for a given set of parameters and data.
 
@@ -177,13 +235,14 @@ def chi2(model: callable, data: np.ndarray, params: tuple) -> float:
     float
         The chi-squared value for the given parameters and data.
     """
-    # TODO: implement calculation of the chi2 value (or equivalent) using the model mean and variance to be minimized.
+    m = model(*params)
+    if not np.all(np.isfinite(m)):
+        return np.inf
+    return np.sum((m - data)**2/m)
 
-    return 0.0  # replace by the correct value
 
-
-def negative_poisson_ln_likelihood(
-    model: callable, data: np.ndarray, params: tuple
+def negative_poisson_ln_likelihood(params: tuple, 
+    model: callable, data: np.ndarray
 ) -> float:
     """
     Calculate the Poisson negative log-likelihood for a given set of parameters and data.
@@ -202,12 +261,14 @@ def negative_poisson_ln_likelihood(
     float
         The Poisson negative log-likelihood value for the given parameters and data.
     """
-    # TODO: implement calculation of the Poisson negative log-likelihood (or equivalent) to be minimized
+    m = model(*params)
+    if not np.all(np.isfinite(m)):
+        return np.inf
 
-    return 0.0  # replace by the correct value
+    return -np.sum(data * np.log(m) -  m)  # replace by the correct value
 
 
-def get_normalization_constant(a: float, b: float, c: float, Nsat: float) -> float:
+def get_normalization_constant(a: float, b: float, c: float, Nsat: float, x_lower:float, x_upper:float) -> float:
     """
     Calculate the normalization constant A (which is a function of a,b,c) for the satellite number density profile.
 
@@ -227,8 +288,10 @@ def get_normalization_constant(a: float, b: float, c: float, Nsat: float) -> flo
     float
         Normalization constant A.
     """
-    # TODO: implement the calculation of the normalization constant
-    return 0.0  # replace by the correct value
+    integrand = lambda x: 4 * np.pi * x**2 * n(x, 1, Nsat, a, b, c)
+    integral = quad(
+        integrand, x_lower, x_upper)[0]
+    return Nsat/integral
 
 
 def minimize_chi2(model: callable, data: np.ndarray, initial_params: tuple) -> tuple:
@@ -253,13 +316,15 @@ def minimize_chi2(model: callable, data: np.ndarray, initial_params: tuple) -> t
     """
 
     # TODO: implement the minimization of chi2 using your custom method. Remember to normalize for each minimization step
+    result = minimize(chi2, x0=initial_params, args=(model, data), bounds=[(0, None), (0, None), (0, None)])
+    # best_a, best_b, best_c = result.x
+    # chi2_min = result.fun
+    # best_params = initial_params
+    # min_chi2 = chi2(
+    #     model, data, initial_params
+    # )  # replace by the correct calculation of chi2 for the given parameters
 
-    best_params = initial_params
-    min_chi2 = chi2(
-        model, data, initial_params
-    )  # replace by the correct calculation of chi2 for the given parameters
-
-    return best_params, min_chi2
+    return result.x, result.fun
 
 
 def minimize_poisson_ln_likelihood(
@@ -287,12 +352,26 @@ def minimize_poisson_ln_likelihood(
 
     # TODO: implement the minimization of the Poisson negative log-likelihood using your custom method. Remember to normalize for each minimization step
 
-    best_params = initial_params
-    min_ln_likelihood = negative_poisson_ln_likelihood(
-        model, data, initial_params
-    )  # replace by the correct calculation of the Poisson negative log-likelihood for the given parameters
+    result = minimize(negative_poisson_ln_likelihood, x0=initial_params, args=(model, data), bounds=[(0, None), (0, None), (0, None)])
 
-    return best_params, min_ln_likelihood
+    return result.x, result.fun
+
+def model(a, b, c, bin_edges, Nsat, x_lower, x_upper):
+    N_i = []
+    A = get_normalization_constant(a, b, c, Nsat, x_lower, x_upper)
+    integrand = lambda x: 4 * np.pi * x**2 * n(x, A, Nsat, a, b, c)
+    for i in range(len(bin_edges)-1):
+        x_i, x_j = bin_edges[i], bin_edges[i+1]
+        integral = quad(integrand, x_i, x_j)[0]
+        N_i.append(integral)
+    return np.array(N_i)
+
+def G_score(data, model):
+    return 2 * np.sum(data[data>0] * (np.log(data[data>0]) - np.log(model[data>0])))
+
+def Q_score(G_score, dof):
+    from scipy.special import gammainc
+    return 1 - gammainc(dof/2, G_score/2)
 
 
 # =====================================================
@@ -301,6 +380,7 @@ def minimize_poisson_ln_likelihood(
 
 
 def do_question_1a():
+    return
     # ======== Question 1a: Maximization of N(x) ========
     a = 2.4
     b = 0.25
@@ -319,11 +399,13 @@ def do_question_1a():
 
 
 def do_question_1b():
+    # return
     # ======== Question 1b: Fitting N(x) with chi-squared ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
 
     N_sat = []
     min_chi2_values = []
+    global best_params_chi2
     best_params_chi2 = []
 
     # initialize figure with 5 subplots on 3x2 grid for the 5 data files
@@ -332,32 +414,35 @@ def do_question_1b():
 
     for datafile in datafiles:
         radius, nhalo = readfile(f"Data/satgals_{datafile}.txt")
-
+        nsat = len(radius) / nhalo
         x_lower, x_upper = (
-            10**-4,
-            5,
-        )  # replace by appropriate limits for x based on the data
-        bins = 10  # choose appropriate bins
+            min(radius),
+            max(radius),
+        )
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        hist = np.histogram(radius, bins=bins)[0]
+        N_i = hist / nhalo
 
-        # TODO: implement the fitting of N(x) to the data using chi-squared minimization.
+        best_params, min_chi2 = minimize_chi2(lambda a, b, c: model(a, b, c, bin_edges=bins, Nsat=nsat, x_lower=x_lower, x_upper=x_upper),
+                      N_i,
+                      [2.4, .25, 1.6])
+        A = get_normalization_constant(*best_params, nsat, x_lower, x_upper)
 
         # Store N_sat, chi2 values and best-fit parameters in their arrays
-        N_sat.append(0.0)
-        min_chi2_values.append(0.0)
-        best_params_chi2.append(
-            (0.0, 0.0, 0.0)
-        )  # replace by the correct best-fit parameters (a,b,c) found from chi-squared minimization
+        N_sat.append(nsat)
+        min_chi2_values.append(min_chi2)
+        best_params_chi2.append(best_params)
 
         # Plot the data and the best-fit model for each data file in a subplot.
-        axs[datafiles.index(datafile)].hist(
-            [], bins=bins
-        )  # plot the histogram of the data
+        axs[datafiles.index(datafile)].stairs(
+        N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True, label="Satellite galaxies"
+        )
 
         x_plot = np.linspace(
             x_lower, x_upper, 100
         )  # create x_array for plotting the model
         axs[datafiles.index(datafile)].plot(
-            x_plot, np.ones_like(x_plot)
+            x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_params)
         )  # plot the best-fit model using the best-fit parameters found from chi-squared minimization
 
         # Add labels and title to the subplot
@@ -385,10 +470,12 @@ def do_question_1b():
 
 
 def do_question_1c():
+    # return 
     # ======== Question 1c: Fitting N(x) with Poisson ln-likelihood ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
 
     min_poisson_llh_values = []
+    global best_params_poisson
     best_params_poisson = []
 
     # initialize figure with 5 subplots on 3x2 grid for the 5 data files
@@ -397,28 +484,34 @@ def do_question_1c():
 
     for datafile in datafiles:
         radius, nhalo = readfile(f"Data/satgals_{datafile}.txt")
+        nsat = len(radius) / nhalo
         x_lower, x_upper = (
-            10**-4,
-            5,
-        )  # replace by appropriate limits for x based on the data
-
-        # TODO: implement fit using Poisson negative log-likelihood minimization.
+            min(radius),
+            max(radius),
+        )
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        hist = np.histogram(radius, bins=bins)[0]
+        N_i = hist / nhalo
+        best_params, min_poisson_llh = minimize_poisson_ln_likelihood(lambda a, b, c: model(a, b, c, bin_edges=bins, Nsat=nsat, x_lower=x_lower, x_upper=x_upper),
+                      N_i,
+                      [2.4, .6, 1.6])
+        A = get_normalization_constant(*best_params, nsat, x_lower, x_upper)
 
         # Store poisson llh values and best-fit parameters in their arrays
-        min_poisson_llh_values.append(0.0)
+        min_poisson_llh_values.append(min_poisson_llh)
         best_params_poisson.append(
-            (0.0, 0.0, 0.0)
+            best_params
         )  # replace by the correct best-fit parameters (a,b,c) found from Poisson negative log-likelihood minimization
 
         # Plot the data and the best-fit model for each data file in a subplot.
-        axs[datafiles.index(datafile)].hist(
-            [], bins=10
-        )  # plot the histogram of the data
+        axs[datafiles.index(datafile)].stairs(
+        N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True, label="Satellite galaxies"
+        )
         x_plot = np.linspace(
             x_lower, x_upper, 100
         )  # create x_array for plotting the model
         axs[datafiles.index(datafile)].plot(
-            x_plot, np.ones_like(x_plot)
+            x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_params)
         )  # plot the best-fit model using the best-fit parameters found from Poisson negative log-likelihood minimization
 
         # Add labels and title to the subplot
@@ -446,6 +539,8 @@ def do_question_1c():
 
 
 def do_question_1d():
+    global best_params_chi2  # replace by the correct array
+    global best_params_poisson # replace by the correct array
     # ======== Question 1d: Statistical tests ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
 
@@ -455,20 +550,33 @@ def do_question_1d():
     G_scores_poisson = []
     Q_scores_poisson = []
 
-    for datafile in datafiles:
+    for i, datafile in enumerate(datafiles):
         radius, nhalo = readfile(f"Data/satgals_{datafile}.txt")
+        nsat = len(radius) / nhalo
+        x_lower, x_upper = (
+            min(radius),
+            max(radius),
+        )
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        hist = np.histogram(radius, bins=bins)[0]
 
         # Use best-fit parameters from previous steps
-        best_params_chi2 = (0.0, 0.0, 0.0)  # replace by the correct array
-        best_params_poisson = (0.0, 0.0, 0.0)  # replace by the correct array
+        fitted_params_chi2 = best_params_chi2[i]# replace by the correct array
+        fitted_params_poisson = best_params_poisson[i]# replace by the correct array
+        model_chi2 = model(*fitted_params_chi2, bins, nsat, x_lower, x_upper)*nhalo
+        model_poisson = model(*fitted_params_poisson, bins, nsat, x_lower, x_upper)*nhalo
 
         # TODO: implement the statistical tests to calculate G and Q scores for both chi2 and poisson fits, and store the results in their respective arrays
+        G_score_chi2 = G_score(hist, model_chi2)
+        Q_score_chi2 = Q_score(G_score_chi2, len(bins) - len(fitted_params_chi2) - 1)
+        G_score_poisson = G_score(hist, model_poisson)
+        Q_score_poisson = Q_score(G_score_poisson, len(bins) - len(fitted_params_poisson) - 1)
 
         # Append the G and Q scores for chi2 and poisson fits to their respective arrays
-        G_scores_chi2.append(0.0)
-        Q_scores_chi2.append(0.0)
-        G_scores_poisson.append(0.0)
-        Q_scores_poisson.append(0.0)
+        G_scores_chi2.append(G_score_chi2)
+        Q_scores_chi2.append(Q_score_chi2)
+        G_scores_poisson.append(G_score_poisson)
+        Q_scores_poisson.append(Q_score_poisson)
 
     # Save G and Q scores for chi2 and poisson fits to tex files for later use in the PDF
     with open("Calculations/statistical_test_table_rows.tex", "w") as f:
