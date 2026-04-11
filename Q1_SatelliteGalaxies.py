@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.integrate import quad
 
+NBINS = 1000
 
 def readfile(filename):
     """
@@ -373,6 +374,90 @@ def Q_score(G_score, dof):
     from scipy.special import gammainc
     return 1 - gammainc(dof/2, G_score/2)
 
+def rng(N: int) -> np.ndarray:
+    """
+    Random number generator 
+
+    Parameters
+    ----------
+    N: int
+        Number of random numbers
+
+    Returns
+    -------
+    np.ndarray
+        Array containing N random numbers
+        if N=1 returns float instead
+    """
+    global seed
+    seed = np.uint64(seed)
+
+    # Parameters for rng
+    a = np.uint64(4294957665)
+    a_1 = np.uint64(21)
+    a_2 = np.uint64(35)
+    a_3 = np.uint64(4)
+
+    rnds = np.zeros(N)
+    for i in range(N):
+
+        # MWC 32-bit
+        seed &= np.uint64(2**32 - 1)
+        seed = a*(seed & np.uint64(2**32 - 1)) + (seed >> np.uint64(32))
+        seed &= np.uint64(2**32 - 1)
+
+        # 64-bit XOR-shift
+        seed ^= (seed>>a_1)
+        seed ^= (seed<<a_2)
+        seed ^= (seed>>a_3)
+
+        # Calculating the float
+        u = seed / np.float64(2**64)
+        rnds[i] = u
+    
+    if N==1:
+        return rnds[0]
+    return rnds
+
+
+def sampler(
+    dist: callable,
+    min: float,
+    max: float,
+    Nsamples: int,
+    args: tuple = (),
+) -> np.ndarray:
+    """
+    Sample a distribution using rejection sampling
+
+    Parameters
+    dist : callable
+        Distribution to sample
+    min :
+        Minimum value for sampling
+    max : float
+        Maximum value for sampling
+    Nsamples : int
+        Number of samples
+    args : tuple, optional
+        Arguments of the distribution to sample, passed as args to dist
+
+    Returns
+    -------
+    sample: ndarray
+        Values sampled from dist, shape (Nsamples,)
+    """
+    xx = np.linspace(min, max, 10000)
+    pdf = dist(xx, *args)
+    cdf = np.array([np.sum(pdf[:i+1]) for i in range(len(pdf))])
+    cdf /= np.max(cdf)
+    # plt.figure(figsize=(6.4, 4.8))
+    # plt.plot(xx, cdf)
+    # plt.xscale('log')
+    # plt.savefig("Plots/test2.png")
+    random_y_values = rng(Nsamples)
+    random_x_values = np.interp(random_y_values, cdf, xx)
+    return random_x_values
 
 # =====================================================
 # ======== Main functions for each subquestion ========
@@ -380,6 +465,7 @@ def Q_score(G_score, dof):
 
 
 def do_question_1a():
+    print('1a')
     return
     # ======== Question 1a: Maximization of N(x) ========
     a = 2.4
@@ -390,6 +476,7 @@ def do_question_1a():
     x_lower, x_upper = 10**-4, 5
 
     x_max, Nx_max = my_minimizer(lambda x: -4*np.pi*x**2*n(x, A=A_1a, Nsat=Nsat, a=a, b=b, c=c), (x_lower, x_upper))
+    Nx_max *= -1
 
     # Write the results to text files for later use in the PDF
     with open("Calculations/satellite_max_x.txt", "w") as f:
@@ -399,6 +486,7 @@ def do_question_1a():
 
 
 def do_question_1b():
+    print('1b')
     # return
     # ======== Question 1b: Fitting N(x) with chi-squared ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
@@ -419,7 +507,7 @@ def do_question_1b():
             min(radius),
             max(radius),
         )
-        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), NBINS)  # choose appropriate bins
         hist = np.histogram(radius, bins=bins)[0]
         N_i = hist / nhalo
 
@@ -435,12 +523,10 @@ def do_question_1b():
 
         # Plot the data and the best-fit model for each data file in a subplot.
         axs[datafiles.index(datafile)].stairs(
-        N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True, label="Satellite galaxies"
+        N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True
         )
 
-        x_plot = np.linspace(
-            x_lower, x_upper, 100
-        )  # create x_array for plotting the model
+        x_plot = np.linspace(x_lower, x_upper, 100)
         axs[datafiles.index(datafile)].plot(
             x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_params)
         )  # plot the best-fit model using the best-fit parameters found from chi-squared minimization
@@ -470,6 +556,7 @@ def do_question_1b():
 
 
 def do_question_1c():
+    print('1c')
     # return 
     # ======== Question 1c: Fitting N(x) with Poisson ln-likelihood ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
@@ -489,7 +576,7 @@ def do_question_1c():
             min(radius),
             max(radius),
         )
-        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), NBINS)  # choose appropriate bins
         hist = np.histogram(radius, bins=bins)[0]
         N_i = hist / nhalo
         best_params, min_poisson_llh = minimize_poisson_ln_likelihood(lambda a, b, c: model(a, b, c, bin_edges=bins, Nsat=nsat, x_lower=x_lower, x_upper=x_upper),
@@ -507,9 +594,7 @@ def do_question_1c():
         axs[datafiles.index(datafile)].stairs(
         N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True, label="Satellite galaxies"
         )
-        x_plot = np.linspace(
-            x_lower, x_upper, 100
-        )  # create x_array for plotting the model
+        x_plot = np.linspace(x_lower, x_upper, 100)
         axs[datafiles.index(datafile)].plot(
             x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_params)
         )  # plot the best-fit model using the best-fit parameters found from Poisson negative log-likelihood minimization
@@ -539,8 +624,9 @@ def do_question_1c():
 
 
 def do_question_1d():
-    global best_params_chi2  # replace by the correct array
-    global best_params_poisson # replace by the correct array
+    print('1d')
+    global best_params_chi2
+    global best_params_poisson
     # ======== Question 1d: Statistical tests ========
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
 
@@ -557,7 +643,7 @@ def do_question_1d():
             min(radius),
             max(radius),
         )
-        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), 20)  # choose appropriate bins
+        bins = np.logspace(np.log10(x_lower), np.log10(x_upper), NBINS)  # choose appropriate bins
         hist = np.histogram(radius, bins=bins)[0]
 
         # Use best-fit parameters from previous steps
@@ -595,6 +681,13 @@ def do_question_1d():
 
 
 def do_question_1e():
+    print('1e')
+    # Set seed
+    global seed
+    seed = 31415926535
+
+    global best_params_chi2
+    global best_params_poisson
     # ======== Question 1e: Monte Carlo simulations ========
     # pick one of the data files to perform the Monte Carlo simulations on, e.g. m12
     datafiles = ["m11", "m12", "m13", "m14", "m15"]
@@ -603,47 +696,84 @@ def do_question_1e():
     )
 
     radius, nhalo = readfile(f"Data/satgals_{datafiles[index]}.txt")
+    nsat = len(radius) / nhalo
+    x_lower, x_upper = (
+        min(radius),
+        max(radius),
+    )
+    bins = np.logspace(np.log10(x_lower), np.log10(x_upper), NBINS)  # choose appropriate bins
+    hist = np.histogram(radius, bins=bins)[0]
+    N_i = hist / nhalo
 
     # Use best-fit parameters from previous steps for the original data file
-    best_params_chi2 = (0.0, 0.0, 0.0)  # replace by the correct array
-    best_params_poisson = (0.0, 0.0, 0.0)  # replace by the correct array
+    best_param_chi2 = best_params_chi2[index]  # replace by the correct array
+    best_param_poisson = best_params_poisson[index]  # replace by the correct array
+
+    p_of_x_chi2 = (
+        lambda x: 4*np.pi*x**2*n(x, 1, 1, *best_param_chi2))
+    p_of_x_poisson = (
+        lambda x: 4*np.pi*x**2*n(x, 1, 1, *best_param_poisson))
+
+    # Normalize probability density for rejection sampling
+    _, Nx_max_chi2 = my_minimizer(lambda x: -1 * p_of_x_chi2(x), (x_lower, x_upper))
+    _, Nx_max_poisson = my_minimizer(lambda x: -1 * p_of_x_poisson(x), (x_lower, x_upper))
+    p_of_x_chi2_norm = lambda x: -1 * p_of_x_chi2(x) / Nx_max_chi2
+    p_of_x_poisson_norm = lambda x: -1 * p_of_x_poisson(x) / Nx_max_poisson
 
     pseudo_chi2_params = []
     pseudo_poisson_params = []
 
     num_pseudo_experiments = 10  # replace by number with reasonable runtime
     for i in range(num_pseudo_experiments):
+        random_samples_chi2 = sampler(p_of_x_chi2_norm, min=x_lower, max=x_upper, Nsamples=nhalo, args=())
+        random_samples_poisson = sampler(p_of_x_poisson_norm, min=x_lower, max=x_upper, Nsamples=nhalo, args=())
+        N_i_chi2 = np.histogram(random_samples_chi2, bins=bins)[0] / nhalo
+        # print(N_i_chi2)
+        # plt.figure(figsize=(6.4, 4.8))
+        # plt.stairs(N_i/(bins[1:] - bins[:-1]), edges=bins, fill=True, alpha=0.5)
+        # plt.stairs(N_i_chi2/(bins[1:] - bins[:-1]), edges=bins, fill=True, alpha=.5)
+        # plt.xscale('log')
+        # plt.yscale('log')
+        # plt.savefig("Plots/test.png")
+        N_i_poisson = np.histogram(random_samples_poisson, bins=bins)[0] / nhalo
 
-        # TODO: generate pseudo-data by sampling from original best-fit chi2 and poisson models
-        # Then, for each pseudo-dataset, perform the chi2 and poisson fits to find the best-fit parameters.
+        mc_param_chi2, _ = minimize_chi2(lambda a, b, c: model(a, b, c, bin_edges=bins, Nsat=nsat, x_lower=x_lower, x_upper=x_upper),
+                      N_i_chi2,
+                      [*best_param_chi2])
+        mc_param_poisson, _ = minimize_poisson_ln_likelihood(lambda a, b, c: model(a, b, c, bin_edges=bins, Nsat=nsat, x_lower=x_lower, x_upper=x_upper),
+                      N_i_poisson,
+                      [*best_param_poisson])
 
         # Append the best-fit parameters for each pseudo-dataset to their respective arrays.
         pseudo_chi2_params.append(
-            (0.0, 0.0, 0.0)
+            mc_param_chi2
         )  # replace by the correct best-fit parameters (a,b,c) found from chi-squared minimization for the pseudo-dataset
         pseudo_poisson_params.append(
-            (0.0, 0.0, 0.0)
+            mc_param_poisson
         )  # replace by the correct best-fit parameters (a,b,c) found from Poisson negative log-likelihood minimization for the pseudo-dataset
 
     # plot the pseudo best-fit profiles, plot the original best-fit profile in another color and plot the mean in one more color
 
     # chi2 plot
-    x_plot = np.linspace(1e-4, 5, 100)  # create x_array for plotting the model
+    x_plot = np.linspace(x_lower, x_upper, 100)  # create x_array for plotting the model
     plt.figure(figsize=(6.4, 4.8))
     for params in pseudo_chi2_params:
+        A = get_normalization_constant(*params, nsat, x_lower, x_upper)
         plt.plot(
-            x_plot, np.ones_like(x_plot)
+            x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *params)
         )  # plot the best-fit model for each pseudo-dataset using the best-fit parameters found from chi-squared minimization
 
+    A = get_normalization_constant(*best_param_chi2, nsat, x_lower, x_upper)
     plt.plot(
-        x_plot, np.ones_like(x_plot)
+        x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_param_chi2)
     )  # plot the original best-fit model using the best-fit parameters found from chi-squared minimization on the real data
 
     mean_params_chi2 = np.mean(
         pseudo_chi2_params, axis=0
     )  # calculate the mean of the best-fit parameters from the pseudo-datasets
+    A = get_normalization_constant(*mean_params_chi2, nsat, x_lower, x_upper)
     plt.plot(
-        x_plot, np.ones_like(x_plot)
+        x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *mean_params_chi2)
     )  # plot the mean of the best-fit models from the pseudo-datasets
 
     plt.title(f"Monte Carlo simulations - chi2 fit - Data file: {datafiles[index]}")
@@ -651,25 +781,29 @@ def do_question_1e():
     plt.ylabel("Number of satellites")
     plt.xscale("log")
     plt.yscale("log")
+    plt.ylim(1e-3, None)
     plt.legend(["Pseudo-dataset fits", "Original fit", "Mean of pseudo fits"])
     plt.savefig("Plots/satellite_monte_carlo_chi2.png")
 
     # poisson plot
-    x_plot = np.linspace(1e-4, 5, 100)  # create x_array for plotting the model
+    x_plot = np.linspace(x_lower, x_upper, 100)  # create x_array for plotting the model
     plt.figure(figsize=(6.4, 4.8))
     for params in pseudo_poisson_params:
+        A = get_normalization_constant(*params, nsat, x_lower, x_upper)
         plt.plot(
-            x_plot, np.ones_like(x_plot)
-        )  # plot the best-fit model for each pseudo-dataset using the best-fit parameters found from Poisson negative log-likelihood minimization
+            x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *params)
+        )   # plot the best-fit model for each pseudo-dataset using the best-fit parameters found from Poisson negative log-likelihood minimization
+    A = get_normalization_constant(*best_param_poisson, nsat, x_lower, x_upper)
     plt.plot(
-        x_plot, np.ones_like(x_plot)
+        x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *best_param_chi2)
     )  # plot the original best-fit model using the best-fit parameters found from Poisson negative log-likelihood minimization on the real data
 
     mean_params_poisson = np.mean(
         pseudo_poisson_params, axis=0
     )  # calculate the mean of the best-fit parameters from the pseudo-datasets
+    A = get_normalization_constant(*mean_params_poisson, nsat, x_lower, x_upper)
     plt.plot(
-        x_plot, np.ones_like(x_plot)
+        x_plot, 4*np.pi*x_plot**2*n(x_plot, A, nsat, *mean_params_poisson)
     )  # plot the mean of the best-fit models from the pseudo-datasets
 
     plt.title(f"Monte Carlo simulations - Poisson fit - Data file: {datafiles[index]}")
@@ -677,6 +811,7 @@ def do_question_1e():
     plt.ylabel("Number of satellites")
     plt.xscale("log")
     plt.yscale("log")
+    plt.ylim(1e-3, None)
     plt.legend(["Pseudo-dataset fits", "Original fit", "Mean of pseudo fits"])
     plt.savefig("Plots/satellite_monte_carlo_poisson.png")
 
