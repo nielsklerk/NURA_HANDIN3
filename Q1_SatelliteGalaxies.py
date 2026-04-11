@@ -466,7 +466,6 @@ def sampler(
 
 def do_question_1a():
     print('1a')
-    return
     # ======== Question 1a: Maximization of N(x) ========
     a = 2.4
     b = 0.25
