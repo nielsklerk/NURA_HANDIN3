@@ -216,59 +216,6 @@ def my_minimizer(
 
 
 #### Fitting ####
-
-
-def chi2(params: tuple, model: callable, data: np.ndarray,) -> float:
-    """
-    Calculate the chi-squared for a given set of parameters and data.
-
-    Parameters
-    ----------
-    model : callable
-        The model function to compare to the data.
-    data : ndarray
-        The observed data to compare the model to.
-    params : tuple
-        The parameters to evaluate the model at.
-
-    Returns
-    -------
-    float
-        The chi-squared value for the given parameters and data.
-    """
-    m = model(*params)
-    if not np.all(np.isfinite(m)):
-        return np.inf
-    return np.sum((m - data)**2/m)
-
-
-def negative_poisson_ln_likelihood(params: tuple, 
-    model: callable, data: np.ndarray
-) -> float:
-    """
-    Calculate the Poisson negative log-likelihood for a given set of parameters and data.
-
-    Parameters
-    ----------
-    model : callable
-        The model function to compare to the data.
-    data : ndarray
-        The observed data to compare the model to.
-    params : tuple
-        The parameters to evaluate the model at.
-
-    Returns
-    -------
-    float
-        The Poisson negative log-likelihood value for the given parameters and data.
-    """
-    m = model(*params)
-    if not np.all(np.isfinite(m)):
-        return np.inf
-
-    return -np.sum(data * np.log(m) -  m)  # replace by the correct value
-
-
 def get_normalization_constant(a: float, b: float, c: float, Nsat: float, x_lower:float, x_upper:float) -> float:
     """
     Calculate the normalization constant A (which is a function of a,b,c) for the satellite number density profile.
@@ -294,6 +241,39 @@ def get_normalization_constant(a: float, b: float, c: float, Nsat: float, x_lowe
         integrand, x_lower, x_upper)[0]
     return Nsat/integral
 
+def model(a, b, c, bin_edges, Nsat, x_lower, x_upper):
+    N_i = []
+    A = get_normalization_constant(a, b, c, Nsat, x_lower, x_upper)
+    integrand = lambda x: 4 * np.pi * x**2 * n(x, A, Nsat, a, b, c)
+    for i in range(len(bin_edges)-1):
+        x_i, x_j = bin_edges[i], bin_edges[i+1]
+        integral = quad(integrand, x_i, x_j)[0]
+        N_i.append(integral)
+    return np.array(N_i)
+
+
+def chi2(params: tuple, model: callable, data: np.ndarray,) -> float:
+    """
+    Calculate the chi-squared for a given set of parameters and data.
+
+    Parameters
+    ----------
+    model : callable
+        The model function to compare to the data.
+    data : ndarray
+        The observed data to compare the model to.
+    params : tuple
+        The parameters to evaluate the model at.
+
+    Returns
+    -------
+    float
+        The chi-squared value for the given parameters and data.
+    """
+    m = model(*params)
+    if not np.all(np.isfinite(m)):
+        return np.inf
+    return np.sum((m - data)**2/m)
 
 def minimize_chi2(model: callable, data: np.ndarray, initial_params: tuple) -> tuple:
     """
@@ -328,6 +308,33 @@ def minimize_chi2(model: callable, data: np.ndarray, initial_params: tuple) -> t
     return result.x, result.fun
 
 
+def negative_poisson_ln_likelihood(params: tuple, 
+    model: callable, data: np.ndarray
+) -> float:
+    """
+    Calculate the Poisson negative log-likelihood for a given set of parameters and data.
+
+    Parameters
+    ----------
+    model : callable
+        The model function to compare to the data.
+    data : ndarray
+        The observed data to compare the model to.
+    params : tuple
+        The parameters to evaluate the model at.
+
+    Returns
+    -------
+    float
+        The Poisson negative log-likelihood value for the given parameters and data.
+    """
+    m = model(*params)
+    if not np.all(np.isfinite(m)):
+        return np.inf
+
+    return -np.sum(data * np.log(m) -  m)  # replace by the correct value
+
+
 def minimize_poisson_ln_likelihood(
     model: callable, data: np.ndarray, initial_params: tuple
 ) -> tuple:
@@ -356,16 +363,6 @@ def minimize_poisson_ln_likelihood(
     result = minimize(negative_poisson_ln_likelihood, x0=initial_params, args=(model, data), bounds=[(0, None), (0, None), (0, None)])
 
     return result.x, result.fun
-
-def model(a, b, c, bin_edges, Nsat, x_lower, x_upper):
-    N_i = []
-    A = get_normalization_constant(a, b, c, Nsat, x_lower, x_upper)
-    integrand = lambda x: 4 * np.pi * x**2 * n(x, A, Nsat, a, b, c)
-    for i in range(len(bin_edges)-1):
-        x_i, x_j = bin_edges[i], bin_edges[i+1]
-        integral = quad(integrand, x_i, x_j)[0]
-        N_i.append(integral)
-    return np.array(N_i)
 
 def G_score(data, model):
     return 2 * np.sum(data[data>0] * (np.log(data[data>0]) - np.log(model[data>0])))
